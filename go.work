@@ -1,6 +1,6 @@
 go 1.21.0
 
 use (
-	go
-	..\work\sat5
+	..\Domain-Threat-Detector\sat5
+	jails
 )

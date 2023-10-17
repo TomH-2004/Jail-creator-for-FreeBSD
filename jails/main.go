@@ -32,7 +32,7 @@ var (
 		pfConfPath:     "/etc/pf.conf",
 	}
 
-	phpPackages = []string{"PHP 8.0", "PHP 8.1", "PHP 8.2", "PHP 8.3"}
+	phpPackages = []string{"php80", "php81", "php82", "php83"}
 	idePackages = []string{"vim", "neovim", "nano"}
 	enterJail   string
 )
