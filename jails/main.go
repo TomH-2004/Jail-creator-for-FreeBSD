@@ -32,7 +32,16 @@ var (
 		pfConfPath:     "/etc/pf.conf",
 	}
 
-	phpPackages = []string{"php80", "php81", "php82", "php83"}
+	phpPackages = []struct {
+		Name    string
+		Package string
+	}{
+		{Name: "PHP 8.0", Package: "php80"},
+		{Name: "PHP 8.1", Package: "php81"},
+		{Name: "PHP 8.2", Package: "php82"},
+		{Name: "PHP 8.3", Package: "php83"},
+	}
+
 	idePackages = []string{"vim", "neovim", "nano"}
 	enterJail   string
 )
@@ -256,7 +265,7 @@ func createFreeBSDJail(jailName string, client *ssh.Client, selectedIDE int, sel
 	if selectedPHP >= 0 && selectedPHP < len(phpPackages) {
 		phpVersion := phpPackages[selectedPHP]
 		fmt.Printf("Installing %s in the jail...\n", phpVersion)
-		if err := execCmd("sudo", "pkg", "-j", jailName, "install", phpVersion); err != nil {
+		if err := execCmd("sudo", "pkg", "-j", jailName, "install", phpVersion.Package); err != nil {
 			return "", 0, err
 		}
 		fmt.Printf("%s has been installed in the jail.\n", phpVersion)
@@ -380,7 +389,7 @@ func main() {
 
 	fmt.Println("Select a PHP version to install:")
 	for i, phpVersion := range phpPackages {
-		fmt.Printf("%d. %s\n", i+1, phpVersion)
+		fmt.Printf("%d. %s\n", i+1, phpVersion.Name)
 	}
 
 	var selectedPHP int
