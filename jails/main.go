@@ -271,6 +271,11 @@ func createFreeBSDJail(jailName string, client *ssh.Client, selectedIDE int, sel
 		fmt.Printf("%s has been installed in the jail.\n", phpVersion)
 	}
 
+	fmt.Printf("Installing Sudo in the jail...\n")
+	if err := execCmd("sudo", "pkg", "-j", jailName, "install", "sudo"); err != nil {
+		return "", 0, err
+	}
+
 	if installApache == 1 {
 		fmt.Printf("Installing Apache 2.4 in the jail...\n")
 		if err := execCmd("sudo", "pkg", "-j", jailName, "install", "apache24"); err != nil {
