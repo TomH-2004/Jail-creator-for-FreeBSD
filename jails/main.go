@@ -194,7 +194,7 @@ func createFreeBSDJail(jailName string, client *ssh.Client, selectedIDE int, sel
 		return "", 0, err
 	}
 
-	assignedPort, err := findAvailablePort(2225, config.pfConfPath)
+	assignedPort, err := findAvailablePort(2222, config.pfConfPath)
 	if err != nil {
 		return "", 0, err
 	}
