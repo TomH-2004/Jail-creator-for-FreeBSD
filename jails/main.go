@@ -447,5 +447,5 @@ func main() {
 
 	log.Printf("Use \"sudo jexec %s\" to enter the new jail\n", jailName)
 
-	fmt.Printf("\033[31m%s is now listening on port %d\033[0m\n", jailName, assignedPort)
+	fmt.Printf("\033[92m%s is now listening on port %d\033[0m\n", jailName, assignedPort)
 }
