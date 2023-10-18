@@ -43,7 +43,6 @@ var (
 	}
 
 	idePackages = []string{"vim", "neovim", "nano"}
-	enterJail   string
 )
 
 func getPassword() (string, error) {
@@ -386,12 +385,6 @@ func main() {
 		log.Fatalf("Failed to read the jail name: %v", err)
 	}
 
-	fmt.Print("Do you want to enter the jail? (yes/no): ")
-	_, err = fmt.Scan(&enterJail)
-	if err != nil {
-		log.Fatalf("Failed to read user input: %v", err)
-	}
-
 	fmt.Println("Select a PHP version to install:")
 	for i, phpVersion := range phpPackages {
 		fmt.Printf("%d. %s\n", i+1, phpVersion.Name)
@@ -455,11 +448,4 @@ func main() {
 	log.Printf("Use \"sudo jexec %s\" to enter the new jail\n", jailName)
 
 	fmt.Printf("\033[31m%s is now listening on port %d\033[0m\n", jailName, assignedPort)
-
-	if strings.ToLower(enterJail) == "yes" {
-		fmt.Printf("Entering the jail '%s'...\n", jailName)
-		if err := execCmd("sudo", "jexec", jailName); err != nil {
-			log.Fatalf("Failed to enter the jail: %v", err)
-		}
-	}
 }
