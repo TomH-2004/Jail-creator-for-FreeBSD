@@ -127,34 +127,7 @@ func findAvailableIP(configPath string) (string, error) {
 	return "", fmt.Errorf("no available IP addresses")
 }
 
-func findAvailablePort(basePort int, configFile string) (int, error) {
-	usedPorts := make(map[int]struct{})
-
-	data, err := ioutil.ReadFile(configFile)
-	if err != nil {
-		return 0, err
-	}
-
-	portPattern := regexp.MustCompile(`rdr pass on \$ext_if proto tcp from any to \$ext_if port (\d+) -> 10\.80\.0\.\d+ port \d+ #\w+`)
-
-	matches := portPattern.FindAllStringSubmatch(string(data), -1)
-	for _, match := range matches {
-		if len(match) == 2 {
-			port, _ := strconv.Atoi(match[1])
-			usedPorts[port] = struct{}{}
-		}
-	}
-
-	for port := basePort; port < basePort+100; port++ {
-		if _, used := usedPorts[port]; !used {
-			return port, nil
-		}
-	}
-
-	return 0, fmt.Errorf("no available port found")
-}
-
-func addPFRuleToConf(pfConfPath, rule string) error {
+func addPFRuleToConf(pfConfPath, rule, sectionName string) error {
 	data, err := ioutil.ReadFile(pfConfPath)
 	if err != nil {
 		return err
@@ -162,24 +135,24 @@ func addPFRuleToConf(pfConfPath, rule string) error {
 
 	lines := strings.Split(string(data), "\n")
 
-	var passLineNum int
 	for i, line := range lines {
-		if strings.Contains(line, "pass on $bridge_if all") {
-			passLineNum = i
-			break
+		if strings.HasPrefix(line, "#"+sectionName) {
+
+			for j := i + 1; j < len(lines); j++ {
+				if strings.TrimSpace(lines[j]) == "" {
+					lines = append(lines[:j], append([]string{rule}, lines[j:]...)...)
+					updatedConf := strings.Join(lines, "\n")
+					err = ioutil.WriteFile(pfConfPath, []byte(updatedConf), 0644)
+					if err != nil {
+						return err
+					}
+					return nil
+				}
+			}
 		}
 	}
 
-	lines = append(lines[:passLineNum], append([]string{rule}, lines[passLineNum:]...)...)
-
-	updatedConf := strings.Join(lines, "\n")
-
-	err = ioutil.WriteFile(pfConfPath, []byte(updatedConf), 0644)
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return fmt.Errorf("section '%s' not found in pf.conf", sectionName)
 }
 
 func createFreeBSDJail(jailName string, client *ssh.Client, selectedIDE int, selectedPHP int, installApache int) (string, int, error) {
@@ -193,7 +166,12 @@ func createFreeBSDJail(jailName string, client *ssh.Client, selectedIDE int, sel
 		return "", 0, err
 	}
 
-	assignedPort, err := findAvailablePort(2222, config.pfConfPath)
+	nextHTTPPort, err := findNextAvailablePort(8080, 100, config.pfConfPath)
+	if err != nil {
+		return "", 0, err
+	}
+
+	nextSSHPort, err := findNextAvailablePort(2222, 100, config.pfConfPath)
 	if err != nil {
 		return "", 0, err
 	}
@@ -211,8 +189,13 @@ func createFreeBSDJail(jailName string, client *ssh.Client, selectedIDE int, sel
 		return "", 0, err
 	}
 
-	pfRule := fmt.Sprintf("rdr pass on $ext_if proto tcp from any to $ext_if port %d -> %s port %d #%s", assignedPort, ip, assignedPort, jailName)
-	if err := addPFRuleToConf(config.pfConfPath, pfRule); err != nil {
+	pfRuleHTTP := fmt.Sprintf("rdr pass on $ext_if proto tcp from any to $ext_if port %d -> %s port %d # %s", nextHTTPPort, ip, nextHTTPPort, jailName)
+	if err := addPFRuleToConf(config.pfConfPath, pfRuleHTTP, "HTTP_PF"); err != nil {
+		return "", 0, err
+	}
+
+	pfRuleSSH := fmt.Sprintf("rdr pass on $ext_if proto tcp from any to $ext_if port %d -> %s port %d # %s", nextSSHPort, ip, nextSSHPort, jailName)
+	if err := addPFRuleToConf(config.pfConfPath, pfRuleSSH, "SSH_PF"); err != nil {
 		return "", 0, err
 	}
 
@@ -263,11 +246,11 @@ func createFreeBSDJail(jailName string, client *ssh.Client, selectedIDE int, sel
 
 	if selectedPHP >= 0 && selectedPHP < len(phpPackages) {
 		phpVersion := phpPackages[selectedPHP]
-		fmt.Printf("Installing %s in the jail...\n", phpVersion)
+		fmt.Printf("Installing %s in the jail...\n", phpVersion.Name)
 		if err := execCmd("sudo", "pkg", "-j", jailName, "install", phpVersion.Package); err != nil {
 			return "", 0, err
 		}
-		fmt.Printf("%s has been installed in the jail.\n", phpVersion)
+		fmt.Printf("%s has been installed in the jail.\n", phpVersion.Name)
 	}
 
 	fmt.Printf("Installing Sudo in the jail...\n")
@@ -285,11 +268,79 @@ func createFreeBSDJail(jailName string, client *ssh.Client, selectedIDE int, sel
 
 	fmt.Printf("FreeBSD jail %s has been created successfully.\n", jailName)
 
-	if err := editSSHDConfigInJail(jailName, assignedPort); err != nil {
+	if err := editSSHDConfigInJail(jailName, nextSSHPort); err != nil {
 		return "", 0, err
 	}
 
-	return ip, assignedPort, nil
+	return ip, nextSSHPort, nil
+}
+
+func findNextAvailablePort(basePort, portRange int, configFile string) (int, error) {
+	usedPorts := make(map[int]struct{})
+
+	data, err := ioutil.ReadFile(configFile)
+	if err != nil {
+		return 0, err
+	}
+
+	portPattern := regexp.MustCompile(`rdr pass on \$ext_if .* port (\d+) -> 10\.80\.0\.\d+ port (\d+) # \w+`)
+
+	matches := portPattern.FindAllStringSubmatch(string(data), -1)
+	for _, match := range matches {
+		if len(match) == 3 {
+
+			internalPort, _ := strconv.Atoi(match[2])
+			externalPort, _ := strconv.Atoi(match[1])
+			usedPorts[internalPort] = struct{}{}
+			usedPorts[externalPort] = struct{}{}
+		}
+	}
+
+	for port := basePort; port < basePort+portRange; port++ {
+		if _, used := usedPorts[port]; !used {
+			return port, nil
+		}
+	}
+
+	return 0, fmt.Errorf("no available port found in the range")
+}
+
+func modifyApacheConfigInJail(jailName string, ip string, httpPort int) error {
+	apacheConfigPath := fmt.Sprintf("/usr/jail/%s/usr/local/etc/apache24/httpd.conf", jailName)
+
+	data, err := ioutil.ReadFile(apacheConfigPath)
+	if err != nil {
+		return err
+	}
+
+	oldListen := "#Listen 12.34.56.78:80"
+	newListen := fmt.Sprintf("Listen %s:%d", ip, httpPort)
+	updatedData := strings.Replace(string(data), oldListen, newListen, -1)
+
+	err = ioutil.WriteFile(apacheConfigPath, []byte(updatedData), 0644)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func editRCConfInJail(jailName string) error {
+	rcConfPath := fmt.Sprintf("/usr/jail/%s/etc/rc.conf", jailName)
+
+	data, err := ioutil.ReadFile(rcConfPath)
+	if err != nil {
+		return err
+	}
+
+	updatedData := "apache24_enable=\"YES\"\n" + string(data)
+
+	err = ioutil.WriteFile(rcConfPath, []byte(updatedData), 0644)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func execCmd(command string, args ...string) error {
@@ -420,6 +471,19 @@ func main() {
 	assignedIP, assignedPort, err := createFreeBSDJail(jailName, client, selectedIDE-1, selectedPHP-1, installApache)
 	if err != nil {
 		log.Fatalf("Failed to create the directory and add jail config: %v", err)
+	}
+
+	nextHTTPPort, err := findNextAvailablePort(8080, 100, config.pfConfPath)
+	if err != nil {
+		log.Fatalf("Failed to find an available HTTP port: %v", err)
+	}
+
+	if err := modifyApacheConfigInJail(jailName, assignedIP, nextHTTPPort); err != nil {
+		log.Fatalf("Failed to modify Apache configuration in the jail: %v", err)
+	}
+
+	if err := editRCConfInJail(jailName); err != nil {
+		log.Fatalf("Failed to edit rc.conf in the jail: %v", err)
 	}
 
 	fmt.Printf("Restarting the jail '%s'...\n", jailName)
